@@ -710,7 +710,7 @@ all_meadow_units = all_meadow_units.merge(
     sw_extra, on='meadow_id', how='left'
 )
 
-#%% land outline
+#%% land outline (low-res alternative)
 
 import cartopy.io.shapereader as shpreader
 import geopandas as gpd
@@ -728,7 +728,27 @@ land = land.to_crs('EPSG:27700')
 print(land.crs)
 print(len(land))
 
+#%%
 #https://osdatahub.os.uk/data/downloads/open/VectorMapDistrict?_gl=1*1vdp4ge*_gcl_au*MTUwNzkwMzE5MC4xNzk0MDYwNjE1*_ga*MTQ0NTkxMjM3OS4xNzk0MDYwNjE1*_ga_59ZBN7DVBG*czE3OTQwNjA2MTUkbzEkZzAkdDE3OTQwNjA2MjMkajUyJGwwJGgw
+import geopandas as gpd
+
+os_path = '/Users/viktorwu/Desktop/Seagrass/vmdvec_gpkg_gb/Data/vmdvec_gb.gpkg'
+
+# See which layers are available
+print(gpd.list_layers(os_path))
+
+coast = gpd.read_file(
+    os_path,
+    layer='tidal_boundary'
+)
+
+coast = coast.to_crs('EPSG:27700')
+land = coast
+
+print(coast.crs)
+print(coast.geom_type.value_counts())
+print(coast.columns.tolist())
+
 
 #%% Plot meadow and surrounding
 
