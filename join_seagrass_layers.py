@@ -5,6 +5,8 @@ Created on Sat Nov  7 09:44:11 2026
 
 @author: viktorwu
 """
+#%%
+%matplotlib widget
 
 import geopandas as gpd
 import pandas as pd
@@ -16,26 +18,26 @@ import matplotlib.pyplot as plt
 #Input datasets
 inputs = [
     {
-        'path': '/Users/viktorwu/Desktop/Seagrass/National_Seagrass_Layer_England_2024_All_Years_9171382247343351990.gpkg',
+        'path': "C:\\Users\\3158557W\\Desktop\\SEAGRASS LAYERS\\National_Seagrass_Layer_England_2024_All_Years_9171382247343351990.gpkg",
         'source': 'Natural England',
         'year_field': 'year',
         'layer': None
     },
     {
-        'path': '/Users/viktorwu/Desktop/Seagrass/GeMS___Scottish_Priority_Marine_Features_5486385292911346861.gpkg',
+        'path': "C:\\Users\\3158557W\\Desktop\\SEAGRASS LAYERS\\GeMS___Scottish_Priority_Marine_Features_5486385292911346861.gpkg",
         'source': 'NatureScot',
         'year_field': 'year',
         'layer': None
     },
     {
-        'path': '/Users/viktorwu/Desktop/Seagrass/Seagrass - Loch Craignish (1).kml',
+        'path': "C:\\Users\\3158557W\\Desktop\\SEAGRASS LAYERS\\Seagrass loch_craignish.kml",
         'source': 'Seawilding',
         'year_field': 'year',
         'layer': None
     }
 ]
 
-output_path = '/path/to/all_seagrass_meadows.gpkg'
+output_path = "C:\\Users\\3158557W\\Desktop\\SEAGRASS LAYERS\\all_seagrass_meadows.gpkg"
 
 #%%
 
@@ -454,6 +456,24 @@ ns_cluster_summary = (
 
 print(ns_cluster_summary.head(25))
 
+#%% land outline (low-res alternative)
+
+import cartopy.io.shapereader as shpreader
+import geopandas as gpd
+
+#Get Natural Earth land polygons
+land_path = shpreader.natural_earth(
+    resolution='10m',
+    category='physical',
+    name='land'
+)
+
+land = gpd.read_file(land_path)
+land = land.to_crs('EPSG:27700')
+
+print(land.crs)
+print(len(land))
+
 #%% Plot clusters to examine visually
 def plot_ns_cluster(year, cluster_id):
 
@@ -564,8 +584,6 @@ print(ns_units.nlargest(10, 'area_ha_calculated')[
      'original_record_count', 'area_ha_calculated']
 ])
 
-#%%
-#If same location, select most recent
 
 #%% Units ready for review
 
@@ -710,29 +728,12 @@ all_meadow_units = all_meadow_units.merge(
     sw_extra, on='meadow_id', how='left'
 )
 
-#%% land outline (low-res alternative)
-
-import cartopy.io.shapereader as shpreader
-import geopandas as gpd
-
-#Get Natural Earth land polygons
-land_path = shpreader.natural_earth(
-    resolution='10m',
-    category='physical',
-    name='land'
-)
-
-land = gpd.read_file(land_path)
-land = land.to_crs('EPSG:27700')
-
-print(land.crs)
-print(len(land))
 
 #%%
 #https://osdatahub.os.uk/data/downloads/open/VectorMapDistrict?_gl=1*1vdp4ge*_gcl_au*MTUwNzkwMzE5MC4xNzk0MDYwNjE1*_ga*MTQ0NTkxMjM3OS4xNzk0MDYwNjE1*_ga_59ZBN7DVBG*czE3OTQwNjA2MTUkbzEkZzAkdDE3OTQwNjA2MjMkajUyJGwwJGgw
 import geopandas as gpd
 
-os_path = '/Users/viktorwu/Desktop/Seagrass/vmdvec_gpkg_gb/Data/vmdvec_gb.gpkg'
+os_path = "C:\\Users\\3158557W\\Desktop\\SEAGRASS LAYERS\\vmdvec_gb.gpkg"
 
 # See which layers are available
 print(gpd.list_layers(os_path))
@@ -1092,3 +1093,68 @@ btn_save.on_clicked(save_progress)
 show_candidate()
 
 plt.show()
+#%% See reviewed
+
+reviewed = gpd.read_file("C:\\Users\\3158557W\\Desktop\\SEAGRASS LAYERS\\seagrass_meadow_review.gpkg")
+
+print(reviewed.columns.tolist())
+print(reviewed['review_status'].value_counts())
+
+kept = reviewed[reviewed['review_status'] == 'keep'].copy()
+
+print('Kept meadows:', len(kept))
+
+#Centroid of meadow
+centroids = gpd.GeoSeries(kept.geometry.centroid, crs=kept.crs)
+centroids_wgs84 = centroids.to_crs('EPSG:4326')
+kept['centre_lon'] = centroids_wgs84.x
+kept['centre_lat'] = centroids_wgs84.y
+
+kept_wgs84 = kept.to_crs('EPSG:4326')
+
+kept_wgs84['centre_lon'] = centroids_wgs84.x
+kept_wgs84['centre_lat'] = centroids_wgs84.y
+
+#%% Exterior coordinates
+def get_coordinates(geometry):
+
+    if geometry.geom_type == 'Polygon':
+
+        return [
+            [round(lon, 7), round(lat, 7)]
+            for lon, lat in geometry.exterior.coords
+        ]
+
+    elif geometry.geom_type == 'MultiPolygon':
+
+        return [
+            [
+                [round(lon, 7), round(lat, 7)]
+                for lon, lat in polygon.exterior.coords
+            ]
+            for polygon in geometry.geoms
+        ]
+
+    else:
+        return None
+
+kept_wgs84['coordinates'] = (
+    kept_wgs84.geometry.apply(get_coordinates)
+)
+#%% Save first geopackage + final csv
+import json
+
+kept.to_file('final_seagrass_meadows.gpkg', driver='GPKG')
+final_table = kept_wgs84.drop(columns='geometry').copy()
+final_table['coordinates'] = (final_table['coordinates'].apply(json.dumps))
+final_table.to_csv('final_seagrass_meadows.csv', index=False)
+
+# %%
+
+#Manually add datelist to table
+
+dates = []
+final_table['date_list'] = None
+final_table.loc[final_table.index[0], 'date_list'] = dates
+
+#Note where we stopped
