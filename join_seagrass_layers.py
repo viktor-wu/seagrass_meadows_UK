@@ -6,7 +6,7 @@ Created on Sat Nov  7 09:44:11 2026
 @author: viktorwu
 """
 #%%
-%matplotlib widget
+#%matplotlib widget
 
 import geopandas as gpd
 import pandas as pd
@@ -14,30 +14,36 @@ import numpy as np
 import os
 import pyogrio
 import matplotlib.pyplot as plt
+from pathlib import Path
+
+NS_PATH = Path.home() / "Desktop" / "Seagrass" / "GeMS___Scottish_Priority_Marine_Features_5486385292911346861.gpkg"
+NE_PATH = Path.home() / "Desktop" / "Seagrass" / "National_Seagrass_Layer_England_2024_All_Years_9171382247343351990.gpkg"
+SW_PATH = Path.home() / "Desktop" / "Seagrass" / "Seagrass loch_craignish.kml"
+WA_PATH = Path.home() / "Desktop" / "Seagrass" / "wales_seagrass.json"
 
 #Input datasets
 inputs = [
     {
-        'path': "C:\\Users\\3158557W\\Desktop\\SEAGRASS LAYERS\\National_Seagrass_Layer_England_2024_All_Years_9171382247343351990.gpkg",
+        'path': NE_PATH,
         'source': 'Natural England',
         'year_field': 'year',
         'layer': None
     },
     {
-        'path': "C:\\Users\\3158557W\\Desktop\\SEAGRASS LAYERS\\GeMS___Scottish_Priority_Marine_Features_5486385292911346861.gpkg",
+        'path': NS_PATH,
         'source': 'NatureScot',
         'year_field': 'year',
         'layer': None
     },
     {
-        'path': "C:\\Users\\3158557W\\Desktop\\SEAGRASS LAYERS\\Seagrass loch_craignish.kml",
+        'path': SW_PATH,
         'source': 'Seawilding',
         'year_field': 'year',
         'layer': None
     }
 ]
 
-output_path = "C:\\Users\\3158557W\\Desktop\\SEAGRASS LAYERS\\all_seagrass_meadows.gpkg"
+output_path = Path.home() / "Desktop" / "Seagrass" / "all_seagrass_meadows.gpkg"
 
 #%%
 
@@ -200,6 +206,37 @@ print(ns_zmarina['YEAR'].value_counts().sort_index())
 ns_zmarina['area_ha_calculated'] = (
     ns_zmarina.geometry.area / 10000
 )
+
+#%% Layer 4
+
+wa = gpd.read_file(WA_PATH)
+wa.columns.tolist()
+
+wa = wa.loc[
+    wa['zone'] == 'Subtidal'
+].copy()
+
+#Manual selection based on column values (source, year, monitoring method, confidence)
+kept_indices = []
+
+for i in range(len(wa)):
+    print(f"\n{'='*40}\nRow Index: {i}\n{'='*40}")
+    print(wa.iloc[i])
+    
+    choice = input("\nKeep this row? ([y] / [n] / [q]uit): ").strip().lower()
+    
+    if choice == 'q':
+        break
+    elif choice == 'y':
+        kept_indices.append(i)
+
+wa_filtered = wa.iloc[kept_indices]
+print(f"\nKept {len(wa_filtered)} out of {len(wa)} rows.")
+
+wa_metric = wa_filtered.to_crs('EPSG:27700')
+wa_metric['area_ha_calculated'] = (
+    wa_metric.geometry.area / 10000
+)
     
 #%% Sort by size
 
@@ -217,19 +254,25 @@ sw_zostera_1ha = sw_zostera[
     sw_zostera['area_ha_calculated'] >= 1
 ].copy()
 
+wa_filtered_1ha = wa_metric[
+    wa_metric['area_ha_calculated'] >= 1
+].copy()
+
 #%% Prep for visual inspection
 
 ne_review = ne_recent
 ns_review = ns_zmarina
 sw_review = sw_zostera
+wa_review = wa_metric
 
 ne_review['source'] = 'Natural England'
 ns_review['source'] = 'NatureScot'
 sw_review['source'] = 'Seawilding'
+wa_metric['source'] = 'DataMapWales'
 
 all_meadows = gpd.GeoDataFrame(
     pd.concat(
-        [ne_review, ns_review, sw_review],
+        [ne_review, ns_review, sw_review, wa_metric],
         ignore_index=True
     ),
     crs='EPSG:27700'
@@ -622,6 +665,21 @@ sw_combined['area_ha_calculated'] = (
     sw_combined.geometry.area / 10000
 )
 
+#Wales 
+wa_combined = wa_review.copy()
+
+wa_combined['meadow_id'] = [
+    f'SW_{i:04d}' for i in range(1, len(wa_combined) + 1)
+]
+
+wa_combined['location'] = np.nan
+wa_combined['year'] = np.nan
+wa_combined['original_record_count'] = 1
+
+#Make sure the area is calculated in the same CRS
+wa_combined['area_ha_calculated'] = (
+    wa_combined.geometry.area / 10000
+)
 
 #Keep a common set of fields
 common_columns = [
@@ -639,7 +697,8 @@ all_meadow_units = gpd.GeoDataFrame(
         [
             ne_combined[common_columns],
             ns_combined[common_columns],
-            sw_combined[common_columns]
+            sw_combined[common_columns],
+            wa_combined[common_columns]
         ],
         ignore_index=True
     ),
@@ -716,6 +775,20 @@ sw_extra = sw_extra[[
     'Area'
 ]].copy()
 
+#Wales attributes
+wa_extra = wa_review.copy()
+wa_extra['meadow_id'] = [
+    f'WA_{i:04d}' for i in range(1, len(wa_extra) + 1)
+]
+
+wa_extra = wa_extra[[
+    'meadow_id',
+    'source',
+    'date',
+    'date_start',
+    'name0'
+]].copy()
+
 all_meadow_units = all_meadow_units.merge(
     ne_extra, on='meadow_id', how='left'
 )
@@ -728,12 +801,16 @@ all_meadow_units = all_meadow_units.merge(
     sw_extra, on='meadow_id', how='left'
 )
 
+all_meadow_units = all_meadow_units.merge(
+    wa_extra, on='meadow_id', how='left'
+)
+
 
 #%%
 #https://osdatahub.os.uk/data/downloads/open/VectorMapDistrict?_gl=1*1vdp4ge*_gcl_au*MTUwNzkwMzE5MC4xNzk0MDYwNjE1*_ga*MTQ0NTkxMjM3OS4xNzk0MDYwNjE1*_ga_59ZBN7DVBG*czE3OTQwNjA2MTUkbzEkZzAkdDE3OTQwNjA2MjMkajUyJGwwJGgw
 import geopandas as gpd
 
-os_path = "C:\\Users\\3158557W\\Desktop\\SEAGRASS LAYERS\\vmdvec_gb.gpkg"
+os_path = Path.home() / "Desktop" / "Seagrass" / "vmdvec_gb.gpkg"
 
 # See which layers are available
 print(gpd.list_layers(os_path))
@@ -876,7 +953,14 @@ source_fields = {
         'Area2',
         'area_ha',
         'aream2'
-    ]
+    ],
+    
+    'DataMapWales': [
+        'source_y'
+        'date',
+        'date_start',
+        'name0',
+        'area_ha_calculated']
 }
 
 #Figure layout
@@ -959,7 +1043,7 @@ def show_candidate():
 
     #Candidate information
     feature_id = candidate['feature_id'].iloc[0]
-    source = candidate['source'].iloc[0]
+    source = candidate['source_x'].iloc[0]
     area = candidate['area_ha_calculated'].iloc[0]
     status = candidate['review_status'].iloc[0]
     reason = candidate['review_reason'].iloc[0]
@@ -1095,7 +1179,9 @@ show_candidate()
 plt.show()
 #%% See reviewed
 
-reviewed = gpd.read_file("C:\\Users\\3158557W\\Desktop\\SEAGRASS LAYERS\\seagrass_meadow_review.gpkg")
+reviewed_path = Path.home() / "Desktop" / "Seagrass" / "seagrass_meadow_review.gpkg"
+reviewed = gpd.read_file(reviewed_path)
+
 
 print(reviewed.columns.tolist())
 print(reviewed['review_status'].value_counts())
@@ -1147,7 +1233,7 @@ import json
 kept.to_file('final_seagrass_meadows.gpkg', driver='GPKG')
 final_table = kept_wgs84.drop(columns='geometry').copy()
 final_table['coordinates'] = (final_table['coordinates'].apply(json.dumps))
-final_table.to_csv('final_seagrass_meadows.csv', index=False)
+final_table.to_csv('final_seagrass_meadows_add_wales.csv', index=False)
 
 # %%
 
