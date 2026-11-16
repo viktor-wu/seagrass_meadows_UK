@@ -1362,7 +1362,87 @@ dates = [
 final_table.at[final_table.index[9], 'date_list'] = dates
 
 #Note where we stopped
-# %%
+#%%
 final_table.to_csv('final_seagrass_meadows.csv', index=False)
 
-# %%
+#%% Overlay with DEM, subselection of final_table
+
+import ast
+from pathlib import Path
+import geopandas as gpd
+import matplotlib.pyplot as plt
+import pandas as pd
+import rasterio
+from rasterio.mask import mask
+from shapely.geometry import Polygon, MultiPolygon, box
+
+#Load data
+final_table = pd.read_csv(seagrass_path)
+final_table['date_list'] = final_table['date_list'].astype(object)
+
+DEM_N_PATH = Path.home() / "Documents" / "DEFRA_DEM" / "DEFRA_DEM_2016_1_Second_North.tif"
+DEM_S_PATH = Path.home() / "Documents" / "DEFRA_DEM" / "DEFRA_DEM_2016_1_Second_South.tif"
+
+#%% Save updated final_table
+
+selected_indices = []
+
+dem_sources = [rasterio.open(f) for f in [DEM_N_PATH, DEM_S_PATH]]
+
+try:
+    for i in range(len(final_table)):
+        coords = ast.literal_eval(final_table['coordinates'].iloc[i])
+        poly = Polygon(coords) if isinstance(coords[0][0], (int, float)) else MultiPolygon([Polygon(p) for p in coords])
+        gdf_poly = gpd.GeoDataFrame({'geometry': [poly]}, crs="EPSG:4326")
+        
+        minx, miny, maxx, maxy = gdf_poly.total_bounds
+        pad = max((maxx - minx), (maxy - miny)) * 0.25 or 0.005
+        crop_box = gpd.GeoDataFrame({'geometry': [box(minx - pad, miny - pad, maxx + pad, maxy + pad)]}, crs=gdf_poly.crs)
+        
+        fig, ax = plt.subplots(figsize=(8, 8))
+        
+        for src in dem_sources:
+            file_crs = src.crs if src.crs is not None else "EPSG:4326"
+            crop_reproj = crop_box.to_crs(file_crs)
+            
+            if box(*src.bounds).intersects(crop_reproj.geometry.iloc[0]):
+                out_img, out_transform = mask(src, crop_reproj.geometry, crop=True)
+                dem_data = out_img[0].astype(float)
+                if src.nodata is not None:
+                    dem_data[dem_data == src.nodata] = np.nan
+                    
+                h, w = dem_data.shape
+                left, top = out_transform * (0, 0)
+                right, bottom = out_transform * (w, h)
+                
+                im = ax.imshow(dem_data, extent=[left, right, bottom, top], cmap='viridis', origin='upper')
+                plt.colorbar(im, ax=ax, label='Elevation / Depth (m)')
+                gdf_poly = gdf_poly.to_crs(file_crs)
+                
+        location_name = final_table.iloc[i]['location']
+        gdf_poly.boundary.plot(ax=ax, color='red', linewidth=2, label=f'Row {i} Polygon')
+        ax.set_title(f"Row {i}: {location_name}")
+        ax.legend()
+        plt.tight_layout()
+        plt.show()
+        
+        #Prompt for visual approval
+        choice = input(f"Row {i} ({location_name}) - Keep this row? [y/n/q]: ").strip().lower()
+        plt.close(fig)  #free memory
+        
+        if choice == 'y':
+            selected_indices.append(i)
+        elif choice == 'q':
+            print("Stopping review early.")
+            break
+finally:
+    for src in dem_sources:
+        src.close()
+
+#Filtered table: preserve the original index! 
+filtered_table = final_table.iloc[selected_indices].copy()
+filtered_table['original_index'] = filtered_table.index  # Explicit column so CSV export keeps it cleanly
+
+#save
+filtered_table.to_csv("selected_seagrass_dem.csv", index=True)
+print(f"Saved {len(filtered_table)} rows to 'selected_seagrass_dem.csv'.")
