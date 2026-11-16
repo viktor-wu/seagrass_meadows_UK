@@ -1235,7 +1235,12 @@ final_table = kept_wgs84.drop(columns='geometry').copy()
 final_table['coordinates'] = (final_table['coordinates'].apply(json.dumps))
 final_table.to_csv('final_seagrass_meadows_add_wales.csv', index=False)
 
-# %%
+#%%
+seagrass_path = Path.home() / "Desktop" / "Seagrass" / "final_seagrass_meadows.csv"
+final_table = pd.read_csv(seagrass_path)
+final_table['date_list'] = final_table['date_list'].astype(object)
+
+#%%
 
 #Manually add datelist to table
 
